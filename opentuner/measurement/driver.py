@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.exc import NoResultFound
+from sqlalchemy.sql.expression import literal
 
 from opentuner.driverbase import DriverBase
 from opentuner.resultsdb.models import *
@@ -39,14 +40,16 @@ class MeasurementDriver(DriverBase):
     self.upper_limit_multiplier = 10.0
     self.default_limit_multiplier = 2.0
 
-    self.laptime = time.time()
     self.machine = self.get_machine()
+
+    self.thread_pool = None
+    self.slots = None
 
   def get_machine(self):
     """
     get (or create) the machine we are currently running on
     """
-    hostname = socket.gethostname()
+    hostname = socket.gethostname().split('.')[0]
     try:
       self.session.flush()
       return self.session.query(Machine).filter_by(name=hostname).one()
@@ -76,27 +79,27 @@ class MeasurementDriver(DriverBase):
         return default
 
     if desired_result.limit:
-      return min(desired_result.limit, self.upper_limit_multiplier * best.time)
+      return min(desired_result.limit, self.upper_limit_multiplier * best.run_time)
     else:
-      return self.default_limit_multiplier * best.time
+      return self.default_limit_multiplier * best.run_time
 
   def report_result(self, desired_result, result, input=None):
     result.configuration = desired_result.configuration
     result.input = input
-    result.machine = self.machine
     result.tuning_run = self.tuning_run
     result.collection_date = datetime.now()
     self.session.add(result)
     desired_result.result = result
     desired_result.state = 'COMPLETE'
     self.input_manager.after_run(desired_result, input)
-    result.collection_cost = self.lap_timer()
+    diff = result.collection_date - desired_result.start_date
+    result.collection_cost = diff.total_seconds()
     self.session.flush()  # populate result.id
     log.debug(
         'Result(id=%d, cfg=%d, time=%.4f, accuracy=%.2f, collection_cost=%.2f)',
         result.id,
         result.configuration.id,
-        result.time,
+        result.run_time,
         result.accuracy if result.accuracy is not None else float('NaN'),
         result.collection_cost)
     self.commit()
@@ -131,13 +134,6 @@ class MeasurementDriver(DriverBase):
 
     self.report_result(desired_result, result, input)
 
-  def lap_timer(self):
-    """return the time elapsed since the last call to lap_timer"""
-    t = time.time()
-    r = t - self.laptime
-    self.laptime = t
-    return r
-
   def claim_desired_result(self, desired_result):
     """
     claim a desired result by changing its state to running
@@ -167,35 +163,75 @@ class MeasurementDriver(DriverBase):
     """
     process all desired_results in the database
     """
-    self.lap_timer()  # reset timer
     q = self.query_pending_desired_results()
 
     if self.interface.parallel_compile:
-      desired_results = []
+      desired_results = {}
       thread_args = []
 
       def compile_result(args):
-        interface, data, result_id = args
-        return interface.compile(data, result_id)
+        results = []
+        for interface, data, result_id, fidelity in args:
+          if fidelity == 0:
+            kwargs = {}
+          else:
+            kwargs = {'fidelity': fidelity}
+          result = interface.compile(data, result_id, **kwargs)
+          results.append(result)
+        return results
 
       for dr in q.all():
         if self.claim_desired_result(dr):
-          desired_results.append(dr)
-          thread_args.append((self.interface, dr.configuration.data, dr.id))
+          if dr.thread is not None:
+            desired_results.setdefault(dr.thread, []).append(dr)
+          else:
+            desired_results[len(desired_results)] = [dr]
+      desired_results = desired_results.values()
+      desired_results = [grp for grp in desired_results if len(grp) > 0]
       if len(desired_results) == 0:
         return
+
+      for dr_grp in desired_results:
+        arg_grp = []
+        for dr in dr_grp:
+          cfg_data = dr.configuration.data
+          driver = self.tuning_run_main.search_driver
+          fidelity = dr.configuration.fidelity
+          args = (self.interface, cfg_data, dr.id, fidelity)
+          arg_grp.append(args)
+        thread_args.append(arg_grp)
       thread_pool = ThreadPool(len(desired_results))
       # print 'Compiling %d results' % len(thread_args)
       try:
         # Use map_async instead of map because of bug where keyboardinterrupts are ignored
         # See http://stackoverflow.com/questions/1408356/keyboard-interrupts-with-pythons-multiprocessing-pool
-        compile_results = thread_pool.map_async(compile_result,
-                                                thread_args).get(9999999)
-      except Exception:
+        result = thread_pool.map_async(compile_result, thread_args)
+        # HG: SQL databases are closed after a certain period of inactivity, so
+        # query every 15 minutes to keep the database open.
+        while not result.ready():
+          self.session.query(literal(1)).scalar()
+          result.wait(900)
+        compile_results = result.get()
+      except KeyboardInterrupt, Exception:
         # Need to kill other processes because only one thread receives
         # exception
         self.interface.kill_all()
         raise
+      desired_results = [dr for grp in desired_results for dr in grp]
+      compile_results = [result for grp in compile_results for result in grp]
+
+      for compile_result in compile_results:
+        if hasattr(compile_result, 'host'):
+          try:
+            host = compile_result.host
+            name = host['name']
+            self.session.flush()
+            machine = self.session.query(Machine).filter_by(name=name).one()
+          except sqlalchemy.orm.exc.NoResultFound:
+            machine = Machine(**host)
+            self.session.add(machine)
+          compile_result.machine = machine
+
       # print 'Running %d results' % len(thread_args)
       for dr, compile_result in zip(desired_results, compile_results):
         # Make sure compile was successful
@@ -211,6 +247,103 @@ class MeasurementDriver(DriverBase):
         if self.claim_desired_result(dr):
           self.run_desired_result(dr)
 
+  def create_slots(self):
+    self.slots = []
+    if self.args.async_compile:
+      for slot in range(self.args.parallelism):
+        self.slots.append({'fidelity': None,
+                           'max_threads': None,
+                           'state': 'IDLE',
+                           'desired_result': None,
+                           'result': None})
+    else:
+      for entry in self.interface.tuner_cfg['core_maps'][self.args.core_map]:
+        fidelity = entry['fidelity']
+        max_threads = entry['max_threads']
+        for slot in range(entry['count']):
+          self.slots.append({'fidelity': fidelity,
+                             'max_threads': max_threads,
+                             'state': 'IDLE',
+                             'desired_result': None,
+                             'result': None})
+      self.args.parallelism = len(self.slots)
+    self.thread_pool = ThreadPool(self.args.parallelism)
+
+  def get_free_slots(self):
+    return [slot for slot in self.slots if slot['state'] == 'IDLE']
+
+  def get_completed_slots(self):
+    slots = []
+    for slot in self.slots:
+      if slot['state'] == 'RUNNING' and slot['result'].ready():
+        slots.append(slot)
+    return slots
+
+  def wait_for_completion(self):
+    try:
+      duration = 0
+      while len(self.get_completed_slots()) == 0:
+        duration += 1
+        if duration == 900:
+          self.session.query(literal(1)).scalar()
+          duration = 0
+        time.sleep(1.0)
+    except KeyboardInterrupt, Exception:
+      # Need to kill other processes because only one thread receives
+      # exception
+      log.info('Killing all processes...')
+      self.interface.kill_all()
+      log.info('All processes were killed...')
+      raise
+
+  def process_results(self):
+    for slot in self.get_completed_slots():
+      dr = slot['desired_result']
+      compile_result = slot['result'].get()[0]
+
+      slot['state'] = 'IDLE'
+      slot['desired_result'] = None
+      slot['result'] = None
+
+      if hasattr(compile_result, 'host'):
+        try:
+          host = compile_result.host
+          name = host['name']
+          self.session.flush()
+          machine = self.session.query(Machine).filter_by(name=name).one()
+        except sqlalchemy.orm.exc.NoResultFound:
+          machine = Machine(**host)
+          self.session.add(machine)
+        compile_result.machine = machine
+      
+      self.run_desired_result(dr, compile_result, dr.id)
+      try:
+        self.interface.cleanup(dr.id)
+      except RuntimeError, e:
+        print e
+
+  def start_compile(self, slot):
+    def compile_result(args):
+      interface, data, result_id, fidelity, max_threads = args
+      kwargs = {}
+      if fidelity != 0:
+        kwargs['fidelity'] = fidelity
+      if max_threads is not None:
+        kwargs['max_threads'] = max_threads
+      return interface.compile(data, result_id, **kwargs)
+
+    slot['state'] = 'RUNNING'
+    dr = self.query_pending_desired_results()[0]
+    if self.claim_desired_result(dr):
+      fidelity = dr.configuration.fidelity
+      thread_args = (self.interface, dr.configuration.data, dr.id, fidelity,
+                     slot['max_threads'])
+      # Use map_async instead of map because of bug where keyboardinterrupts
+      # are ignored.  See
+      # http://stackoverflow.com/questions/1408356/keyboard-interrupts-with-pythons-multiprocessing-pool
+      result = self.thread_pool.map_async(compile_result, [thread_args])
+      slot['desired_result'] = dr
+      slot['result'] = result
 
 def _cputype():
   try:
@@ -222,8 +355,11 @@ def _cputype():
     # for OS X
     import subprocess
 
-    return subprocess.Popen(["sysctl", "-n", "machdep.cpu.brand_string"],
-                            stdout=subprocess.PIPE).communicate()[0].strip()
+    # The close_fds argument makes sure that file descriptors that should be
+    # closed do not remain open because they are copied to the subprocess.
+    subproc = subprocess.Popen(["sysctl", "-n", "machdep.cpu.brand_string"],
+                               stdout=subprocess.PIPE, close_fds=True)
+    return subproc.communicate()[0].strip()
   except:
     log.warning("failed to get cpu type")
   return "unknown"
@@ -262,9 +398,11 @@ def _memorysize():
     # for OS X
     import subprocess
 
-    return int(subprocess.Popen(["sysctl", "-n", "hw.memsize"],
-                                stdout=subprocess.PIPE)
-               .communicate()[0].strip())
+    # The close_fds argument makes sure that file descriptors that should be
+    # closed do not remain open because they are copied to the subprocess.
+    subproc = subprocess.Popen(["sysctl", "-n", "hw.memsize"],
+                               stdout=subprocess.PIPE, close_fds=True)
+    return int(subproc.communicate()[0].strip())
   except:
     log.warning("failed to get total memory")
   return 1024 ** 3

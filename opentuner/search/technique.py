@@ -8,6 +8,7 @@ import sys
 from importlib import import_module
 from datetime import datetime
 from fn import _
+from timeit import default_timer as timer
 
 from opentuner.resultsdb.models import *
 from plugin import SearchPlugin
@@ -35,6 +36,7 @@ class SearchTechniqueBase(object):
       self.name = name
     else:
       self.name = self.default_name()
+    self.max_fidelity = 1
 
   def is_ready(self):
     """test if enough data has been gathered to use this technique"""
@@ -79,12 +81,14 @@ class SearchTechnique(SearchPlugin, SearchTechniqueBase):
     self.objective = driver.objective
     driver.add_plugin(self)
 
-  def desired_result(self):
+  def desired_result(self, **kwargs):
     """
     create and return a resultsdb.models.DesiredResult
     returns None if no desired results and False if waiting for results
     """
-    cfg = self.desired_configuration()
+    start_time = timer()
+    cfg = self.desired_configuration(**kwargs)
+    duration = timer() - start_time
     if cfg is None:
       return None
     if cfg is False:
@@ -97,7 +101,8 @@ class SearchTechnique(SearchPlugin, SearchTechniqueBase):
                             requestor=self.name,
                             generation=self.driver.generation,
                             request_date=datetime.now(),
-                            tuning_run=self.driver.tuning_run)
+                            tuning_run=self.driver.tuning_run,
+                            search_time=duration)
     if hasattr(self, 'limit'):
       desired.limit = self.limit
     self.driver.register_result_callback(desired, self.handle_requested_result)

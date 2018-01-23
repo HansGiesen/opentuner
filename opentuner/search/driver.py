@@ -37,6 +37,9 @@ argparser.add_argument('--seed-configuration', action='append', default=[],
                            specified multiple times.  Configurations are loaded
                            with ConfigurationManipulator.load_from_file()
                            and file format is detected from extension.""")
+argparser.add_argument('--async-compile', action='store_true',
+                       help='run compilation threads asynchronously')
+argparser.add_argument('--core-map', help='Mapping of fidelities on cores')
 
 
 class SearchDriver(DriverBase):
@@ -71,6 +74,18 @@ class SearchDriver(DriverBase):
     else:
       self.root_technique = copy.deepcopy(technique.get_root(self.args))
 
+    if getattr(self.args, 'original_batching', True):
+      self.batch_composer = None
+    else:
+      from hudson.models.gaussiandistribution import GaussianDistribution
+      from hudson.search.batchcomposition import BatchComposer
+      max_fidelity = self.root_technique.max_fidelity
+      models = [GaussianDistribution() for i in range(max_fidelity)]
+      for model in models:
+        model.set_driver(self)
+      self.batch_composer = BatchComposer(self.root_technique, models,
+                                          self.args.parallelism)
+
     if isinstance(self.root_technique, AUCBanditMetaTechnique):
       self.session.flush()
       info = BanditInfo(tuning_run=self.tuning_run,
@@ -84,7 +99,6 @@ class SearchDriver(DriverBase):
 
 
     self.objective.set_driver(self)
-    self.pending_config_ids = set()
     self.best_result = None
     self.new_results = []
 
@@ -140,10 +154,11 @@ class SearchDriver(DriverBase):
       elif self.generation - dr.generation > self.args.pipelining:
         # see if we can find a result
         results = self.results_query(config=dr.configuration).all()
-        log.warning("Result callback %d (requestor=%s) pending for "
-                    "%d generations %d results available",
-                    dr.id, dr.requestor, self.generation - dr.generation,
-                    len(results))
+        if not self.args.async_compile and not self.args.core_map:
+          log.warning("Result callback %d (requestor=%s) pending for "
+                      "%d generations %d results available",
+                      dr.id, dr.requestor, self.generation - dr.generation,
+                      len(results))
         if len(results):
           dr.result = results[0]
           callback(dr.result)
@@ -154,17 +169,29 @@ class SearchDriver(DriverBase):
   def has_results(self, config):
     return self.results_query(config=config).count() > 0
 
-  def run_generation_techniques(self):
+  def run_generation_techniques(self, batch_size=None, fidelity=None):
     tests_this_generation = 0
     self.plugin_proxy.before_techniques()
-    for z in xrange(self.args.parallelism):
-      if self.seed_cfgs:
+    if hasattr(self.root_technique, 'start_batch'):
+      self.root_technique.start_batch()
+    if batch_size is None:
+      if self.batch_composer:
+        batch = self.batch_composer.compose_batch()
+        batch_size = len(batch)
+      else:
+        batch_size = self.args.parallelism
+    for z in xrange(batch_size):
+      if self.batch_composer:
+        dr = batch.pop(0)
+      elif self.seed_cfgs:
         config = self.get_configuration(self.seed_cfgs.pop())
         dr = DesiredResult(configuration=config,
                            requestor='seed',
                            generation=self.generation,
                            request_date=datetime.now(),
                            tuning_run=self.tuning_run)
+      elif fidelity is not None:
+        dr = self.root_technique.desired_result(fidelity=fidelity)
       else:
         dr = self.root_technique.desired_result()
       if dr is None or dr is False:
@@ -198,6 +225,9 @@ class SearchDriver(DriverBase):
       else:
         log.debug("desired result id=%d, cfg=%d", dr.id, dr.configuration_id)
         dr.state = 'REQUESTED'
+
+      if self.batch_composer:
+        self.register_result_callback(dr, self.batch_composer.add_result)
       self.test_count += 1
       tests_this_generation += 1
     self.plugin_proxy.after_techniques()
@@ -206,7 +236,7 @@ class SearchDriver(DriverBase):
   def process_new_results(self):
     self.new_results = []
     for result in (self.results_query()
-                       .filter_by(was_new_best=None)
+                       .filter(Result.was_new_best == None)
                        .order_by(Result.collection_date)):
       self.plugin_proxy.on_result(result)
       self.new_results.append(result)
@@ -247,33 +277,53 @@ class SearchDriver(DriverBase):
 
     return PluginProxy()
 
-  def get_configuration(self, cfg):
+  def get_configuration(self, cfg, fidelity=0):
     """called by SearchTechniques to create Configuration objects"""
     self.manipulator.normalize(cfg)
     hashv = self.manipulator.hash_config(cfg)
-    config = Configuration.get(self.session,self.program, hashv, cfg)
+    config = Configuration.get(self.session,self.program, hashv, cfg, fidelity)
     return config
 
   def main(self):
     self.plugin_proxy.set_driver(self)
     self.plugin_proxy.before_main()
 
-    no_tests_generations = 0
-
-    # prime pipeline with tests
-    for z in xrange(self.args.pipelining):
-      self.run_generation_techniques()
-      self.generation += 1
-
-    while not self.convergence_criteria():
-      if self.run_generation_techniques() > 0:
-        no_tests_generations = 0
-      elif no_tests_generations <= self.args.bail_threshold:
-        no_tests_generations += 1
-      else:
-        break
-      self.run_generation_results(offset=-self.args.pipelining)
-      self.generation += 1
+    if self.args.core_map or self.args.async_compile:
+      self.tuning_run_main.create_slots()
+      while not self.convergence_criteria():
+        slots = self.tuning_run_main.get_free_slots()
+        for slot in slots:
+#          log.info('Searching for fidelity %d', slot['fidelity'])
+          if self.run_generation_techniques(1, slot['fidelity']) > 0:
+#            log.info('Starting build at fidelity %d', slot['fidelity'])
+            self.generation += 1
+            self.commit()
+            self.tuning_run_main.start_compile(slot)
+#        log.info('States 1: %s', [slot['state'] for slot in self.tuning_run_main.measurement_driver.slots])
+        self.plugin_proxy.before_results_wait()
+        self.tuning_run_main.wait_for_completion()
+#        log.info('Ready: %s', [slot['result'].ready() for slot in self.tuning_run_main.measurement_driver.slots if slot['result'] is not None])
+        self.plugin_proxy.after_results_wait()
+        self.tuning_run_main.process_results()
+#        log.info('States 2: %s', [slot['state'] for slot in self.tuning_run_main.measurement_driver.slots])
+        self.process_new_results()
+    else:
+      no_tests_generations = 0
+  
+      # prime pipeline with tests
+      for z in xrange(self.args.pipelining):
+        self.run_generation_techniques()
+        self.generation += 1
+  
+      while not self.convergence_criteria():
+        if self.run_generation_techniques() > 0:
+          no_tests_generations = 0
+        elif no_tests_generations <= self.args.bail_threshold:
+          no_tests_generations += 1
+        else:
+          break
+        self.run_generation_results(offset=-self.args.pipelining)
+        self.generation += 1
 
     self.plugin_proxy.after_main()
 

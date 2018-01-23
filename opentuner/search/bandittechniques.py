@@ -172,11 +172,6 @@ class AUCBanditMetaTechnique(MetaSearchTechnique):
     """
     techniques, generators = all_techniques()
 
-    # get set of parameters to consider
-    paramset = set()
-    for p in manipulator.params:
-      paramset.add(type(p))
-
     # filter techniques to get rid of metatechniques
     basetechniques = [t for t in techniques if not isinstance(t, MetaSearchTechnique)]
     bandit_techniques = []

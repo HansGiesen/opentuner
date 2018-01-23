@@ -57,12 +57,13 @@ class MeasurementInterface(object):
     self._manipulator = manipulator
     self._input_manager = input_manager
 
-    self.pids = []
-    self.pid_lock = threading.Lock()
+    self.procs = []
+    self.proc_lock = threading.Lock()
     self.parallel_compile = args.parallel_compile
     # If parallel_compile is False then compile_and_run() will be invoked
     # sequentially otherwise the driver first invokes compile() in parallel
     # followed by run_precompiled() sequentially
+    self.terminate = False
 
   def compile(self, config_data, id):
     """
@@ -134,7 +135,7 @@ class MeasurementInterface(object):
     run the given desired_result on input and produce a Result(),
     abort early if limit (in seconds) is reached
     """
-    return opentuner.resultdb.models.Result()
+    return opentuner.resultsdb.models.Result()
 
   def save_final_config(self, config):
     """
@@ -220,11 +221,11 @@ class MeasurementInterface(object):
     return []
 
   def kill_all(self):
-    self.pid_lock.acquire()
-    for pid in self.pids:
-      goodkillpg(pid)
-    self.pids = []
-    self.pid_lock.release()
+    self.proc_lock.acquire()
+    self.terminate = True
+    for proc in self.procs:
+      goodkillpg(proc, 10)
+    self.proc_lock.release()
 
   def call_program(self, cmd, limit=None, memory_limit=None, **kwargs):
     """
@@ -233,7 +234,7 @@ class MeasurementInterface(object):
     returns dictionary like
       {'returncode': 0,
        'stdout': '', 'stderr': '',
-       'timeout': False, 'time': 1.89}
+       'timeout': False, 'run_time': 1.89}
     """
     the_io_thread_pool_init(self.args.parallelism)
     if limit is float('inf'):
@@ -242,13 +243,18 @@ class MeasurementInterface(object):
       kwargs['shell'] = True
     killed = False
     t0 = time.time()
+    # The close_fds argument makes sure that file descriptors that should be
+    # closed do not remain open because they are copied to the subprocess.
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          preexec_fn=preexec_setpgid_setrlimit(memory_limit),
-                         **kwargs)
+                         close_fds=True, **kwargs)
     # Add p.pid to list of processes to kill in case of keyboardinterrupt
-    self.pid_lock.acquire()
-    self.pids.append(p.pid)
-    self.pid_lock.release()
+    self.proc_lock.acquire()
+    if self.terminate:
+      p.terminate()
+    else:
+      self.procs.append(p)
+    self.proc_lock.release()
 
     try:
       stdout_result = the_io_thread_pool.apply_async(p.stdout.read)
@@ -258,7 +264,7 @@ class MeasurementInterface(object):
           goodwait(p)
         elif limit and time.time() > t0 + limit:
           killed = True
-          goodkillpg(p.pid)
+          goodkillpg(p, 10)
           goodwait(p)
         else:
           # still waiting...
@@ -273,17 +279,17 @@ class MeasurementInterface(object):
         p.poll()
     except:
       if p.returncode is None:
-        goodkillpg(p.pid)
+        goodkillpg(p, 10)
       raise
     finally:
       # No longer need to kill p
-      self.pid_lock.acquire()
-      if p.pid in self.pids:
-        self.pids.remove(p.pid)
-      self.pid_lock.release()
+      self.proc_lock.acquire()
+      if p in self.procs:
+        self.procs.remove(p)
+      self.proc_lock.release()
 
     t1 = time.time()
-    return {'time': float('inf') if killed else (t1 - t0),
+    return {'run_time': float('inf') if killed else (t1 - t0),
             'timeout': killed,
             'returncode': p.returncode,
             'stdout': stdout_result.get(),
@@ -330,18 +336,32 @@ def the_io_thread_pool_init(parallelism=1):
     the_io_thread_pool.map(int, range(2 * parallelism))
 
 
-def goodkillpg(pid):
+def goodkillpg(p, limit):
   """
-  wrapper around kill to catch errors
+  try to terminate process gracefully, kill if it does not work
   """
-  log.debug("killing pid %d", pid)
+  log.debug("terminating pid %d", p.pid)
   try:
     if hasattr(os, 'killpg'):
-      os.killpg(pid, signal.SIGKILL)
+      os.killpg(p.pid, signal.SIGTERM)
     else:
-      os.kill(pid, signal.SIGKILL)
+      os.kill(p.pid, signal.SIGTERM)
   except:
-    log.error('error killing process %s', pid, exc_info=True)
+    log.error('error terminating process %s', p.pid, exc_info=True)
+  t0 = time.time()
+  while time.time() < t0 + limit:
+    time.sleep(0.001)
+    p.poll()
+    if p.returncode is not None:
+      return
+  log.debug("killing pid %d", p.pid)
+  try:
+    if hasattr(os, 'killpg'):
+      os.killpg(p.pid, signal.SIGKILL)
+    else:
+      os.kill(p.pid, signal.SIGKILL)
+  except:
+    log.error('error killing process %s', p.pid, exc_info=True)
 
 
 def goodwait(p):

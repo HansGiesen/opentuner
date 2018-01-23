@@ -115,16 +115,16 @@ class FileDisplayPlugin(SearchPlugin):
       self.details = None
 
   def on_result(self, result):
-    if self.out and result.time < self.last_best:
-      self.last_best = result.time
+    if self.out and result.run_time < self.last_best:
+      self.last_best = result.run_time
       print >>self.out, \
           (result.collection_date - self.start_date).total_seconds(), \
-          result.time
+          result.run_time
       self.out.flush()
     if self.details:
       print >>self.details, \
           (result.collection_date - self.start_date).total_seconds(), \
-          result.time
+          result.run_time
       self.details.flush()
 
 def get_enabled(args):

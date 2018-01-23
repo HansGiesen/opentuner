@@ -15,6 +15,8 @@ from opentuner import resultsdb
 from opentuner.search.driver import SearchDriver
 from opentuner.measurement.driver import MeasurementDriver
 
+from sqlalchemy.exc import SQLAlchemyError
+
 log = logging.getLogger(__name__)
 
 argparser = argparse.ArgumentParser(add_help=False)
@@ -161,6 +163,12 @@ class TuningRunMain(object):
         ))
       self.session.add(self.tuning_run)
 
+      cfg = self.manipulator.seed_config()
+      for param in self.manipulator.parameters(cfg):
+        info = param.get_info()
+        info.tuning_run = self.tuning_run
+        self.session.add(info)
+
       driver_kwargs = {
         'args': self.args,
         'input_manager': self.input_manager,
@@ -180,7 +188,7 @@ class TuningRunMain(object):
       self.measurement_interface.set_driver(self.measurement_driver)
       self.input_manager.set_driver(self.measurement_driver)
 
-      self.tuning_run.machine_class = self.measurement_driver.get_machine_class()
+      self.tuning_run.machine = self.measurement_driver.get_machine()
       self.tuning_run.input_class = self.input_manager.get_input_class()
 
   def commit(self, force=False):
@@ -202,6 +210,12 @@ class TuningRunMain(object):
             self.search_driver.best_result.configuration)
       self.tuning_run.final_config = self.search_driver.best_result.configuration
       self.tuning_run.state = 'COMPLETE'
+    except SQLAlchemyError as exception:
+      # HG: Some SQLAlchemy errors result in another exception when the commit
+      # is performed in the finally clause, so it's better to output them now.
+      log.error(exception)
+      self.tuning_run.state = 'ABORTED'
+      raise
     except:
       self.tuning_run.state = 'ABORTED'
       raise
@@ -213,9 +227,24 @@ class TuningRunMain(object):
   def results_wait(self, generation):
     """called by search_driver to wait for results"""
     #single process version:
-    self.measurement_interface.pre_process()  
+    self.measurement_interface.pre_process()
     self.measurement_driver.process_all()
     self.measurement_interface.post_process()
+
+  def create_slots(self):
+    self.measurement_driver.create_slots()
+
+  def get_free_slots(self):
+    return self.measurement_driver.get_free_slots()
+
+  def wait_for_completion(self):
+    self.measurement_driver.wait_for_completion()
+
+  def process_results(self):
+    self.measurement_driver.process_results()
+
+  def start_compile(self, slot):
+    self.measurement_driver.start_compile(slot)
 
 def main(interface, args, *pargs, **kwargs):
   if inspect.isclass(interface):

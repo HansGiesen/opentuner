@@ -102,13 +102,13 @@ class DifferentialEvolution(SearchTechnique):
     cfg_params = self.manipulator.proxy(cfg)
 
     # pick 3 random parents, not pp
-    shuffled_pop = list(set(self.population) - set([parent_pop_member]))
+    shuffled_pop = self.population[:]
+    shuffled_pop.remove(parent_pop_member)
 
     # share information with other techniques
     if self.driver.best_result:
       shuffled_pop += ([PopulationMember(self.driver.best_result.configuration)]
                        * self.information_sharing)
-
     random.shuffle(shuffled_pop)
     x1, x2, x3 = map(_.config.data, shuffled_pop[0:3])
 

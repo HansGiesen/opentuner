@@ -33,19 +33,22 @@ if False:  # profiling of queries
 
 
 def connect(dbstr):
-  engine = create_engine(dbstr, echo = False)
-  connection = engine.connect()
+  engine = create_engine(dbstr, echo = False, pool_recycle=3600)
+
+  # HG: OpenTuner keeps session open until the application is closed, which is
+  # bad practice.  Fixing it is too time-consuming, so I will set the timeout
+  # to the maximum instead.
+  engine.execute('set wait_timeout=31536000')
 
   #handle case that the db was initialized before a version table existed yet
-  if engine.dialect.has_table(connection, "program"):
+  if engine.has_table("program"):
     # if there are existing tables
-    if not engine.dialect.has_table(connection, "_meta"):
+    if not engine.has_table("_meta"):
       # if no version table, assume outdated db version and error
-      connection.close()
       raise Exception("Your opentuner database is currently out of date. Save a back up and reinitialize")
 
   # else if we have the table already, make sure version matches
-  if engine.dialect.has_table(connection, "_meta"):
+  if engine.has_table("_meta"):
     Session = scoped_session(sessionmaker(autocommit=False,
                                           autoflush=False,
                                           bind=engine))

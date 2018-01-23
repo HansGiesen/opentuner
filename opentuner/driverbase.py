@@ -38,11 +38,23 @@ class DriverBase(object):
 
     if objective_ordered:
       q = self.objective.result_order_by(q)
+    
+    driver = self.tuning_run_main.search_driver
+    max_fidelity = driver.root_technique.max_fidelity
+    if max_fidelity > 1:
+      q = q.join(Configuration)
+      q = q.filter(Configuration.fidelity == max_fidelity)
 
     return q
 
-  def requests_query(self):
-    q = self.session.query(DesiredResult).filter_by(tuning_run=self.tuning_run)
+  def requests_query(self,
+                     config=None):
+    q = self.session.query(DesiredResult)
+    q = q.filter_by(tuning_run=self.tuning_run)
+
+    if config:
+      q = q.filter_by(configuration=config)
+
     return q
     
 

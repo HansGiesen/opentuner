@@ -139,7 +139,7 @@ def combined_stats_over_time(label,
   combine stats_over_time() vectors for multiple runs
   """
 
-  extract_fn = _.result.time
+  extract_fn = _.result.run_time
   combine_fn = min
   no_data = 999
 
@@ -259,7 +259,7 @@ def get_values(labels):
 
     q = (session.query(resultsdb.models.Result)
          .filter(resultsdb.models.Result.tuning_run_id.in_(all_run_ids))
-         .filter(resultsdb.models.Result.time < float('inf'))
+         .filter(resultsdb.models.Result.run_time < float('inf'))
          .filter_by(was_new_best=True, state='OK'))
     total = q.count()
     q = objective.filter_acceptable(q)

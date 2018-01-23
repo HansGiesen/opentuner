@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+from opentuner.resultsdb.models import ParameterInfo
 import os
 import pickle
 import random
@@ -107,7 +108,7 @@ class ConfigurationManipulatorBase(object):
   def random(self):
     """produce a random initial configuration"""
     return
-
+  
   @abc.abstractmethod
   def parameters(self, config):
     """return a list of of Parameter objects"""
@@ -167,6 +168,32 @@ class ConfigurationManipulator(ConfigurationManipulatorBase):
     for p in self.parameters(cfg):
       p.op1_randomize(cfg)
     return cfg
+
+  def get_random_vecs(self, count, bounds, random_state=None):
+    """Returns random configuration vectors within the provided bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    bounds : list of list of float
+      List with minimum and maximum for each parameter
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, no of parameters)
+      Random configuration vectors    
+    """
+    if random_state is None:
+      random_state = numpy.random.random.__self__
+    vecs = numpy.empty((count, len(self.params)))
+    for idx, param in enumerate(self.params):
+      lower_bound, upper_bound = bounds[idx]
+      vecs[:, idx] = param.get_random_values(count, lower_bound, upper_bound,
+                                             random_state)
+    return vecs
 
   def parameters(self, config):
     """return a list of Parameter objects"""
@@ -263,6 +290,83 @@ class ConfigurationManipulator(ConfigurationManipulatorBase):
     for pname in self.param_names(cfg):
       param = param_dict[pname]
       getattr(param, sv_map[pname])(cfg, *args[pname], **kwargs[pname])
+
+  def get_vec(self, cfg):
+    """Return a vector representation of a configuration.
+    
+    Parameters
+    ----------
+    cfg : dict
+      Configuration
+
+    Returns
+    -------
+    list of float
+      Vector representation
+    """
+    return [param.get_num_value(cfg) for param in self.parameters(cfg)]
+
+  def get_cfg(self, vec):
+    """Return the configuration associated with the provided vector.
+
+    Parameters
+    ----------
+    vec : array of shape(no of features, )
+      Configuration vector
+
+    Returns
+    -------
+    Configuration
+      Configuration
+    """
+    cfg = {}
+    for idx, param in enumerate(self.parameters(cfg)):
+      param.set_num_value(cfg, vec[idx])
+    return cfg
+
+  def get_bounds(self):
+    """Return a vector with upper and lower bounds for each parameter.
+
+    Returns
+    -------
+    list of list of float
+      List with minimum and maximum for each parameter
+    """
+    return [param.get_bounds() for param in self.params]
+
+  def norm_vecs(self, vecs):
+    """Normalize configuration vectors to the unit range.
+
+    Parameters
+    ----------
+    vecs : array of shape(no of configurations, no of features)
+      Configuration vectors
+
+    Returns
+    -------
+    array of shape(no of configurations, no of features)
+      Normalized configuration vectors
+    """
+    bounds = numpy.array(self.get_bounds())
+    lower_bounds = bounds[:, 0]
+    upper_bounds = bounds[:, 1]
+    return (vecs - lower_bounds) / (upper_bounds - lower_bounds)
+
+  def round_vec(self, vec):
+    """Round a vector to the nearest valid configuration.
+
+    Parameters
+    ----------
+    vec : array of shape(no of features, )
+      Configuration vector
+
+    Returns
+    -------
+    array of shape(no of features, )
+      Rounded configuration vector
+    """
+    return numpy.array([param.round_param(value)
+                        for param, value in zip(self.params, vec)])
 
 
 class Parameter(object):
@@ -436,6 +540,104 @@ class Parameter(object):
         self.copy_value(cfg, cfgs[i])
         break
 
+  @abc.abstractmethod
+  def get_values(self):
+    pass
+
+  @abc.abstractmethod
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+
+    Returns
+    -------
+    float
+      Parameter value
+    """
+    pass
+
+  @abc.abstractmethod
+  def set_num_value(self, cfg, value):
+    """Set parameter in the given configuration using numerical value.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+    value : float
+      Parameter value
+    """
+    pass
+  
+  @abc.abstractmethod
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    pass
+
+  @abc.abstractmethod
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    float
+      Minimum
+    float
+      Maximum
+    """
+    pass
+    
+  def get_random_values(self, count, lower_bound, upper_bound, random_state):
+    """Returns random values between the given bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    lower_bound : float
+      Lower bound
+    upper_bound : float
+      Upper_bound
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, )
+      Random configuration vectors    
+    """
+    pass
+
+  def get_info(self):
+    """Return a database object with information about the parameter.
+
+    Returns
+    -------
+    ParameterInfo
+      Parameter information
+    """
+    lower_bound, upper_bound = self.get_bounds()
+    info = ParameterInfo(name=self.name,
+                         kind=self.__class__.__name__,
+                         lower_bound=lower_bound,
+                         upper_bound=upper_bound)
+    return info
+
 
 class PrimitiveParameter(Parameter):
   """
@@ -444,8 +646,9 @@ class PrimitiveParameter(Parameter):
   """
   __metaclass__ = abc.ABCMeta
 
-  def __init__(self, name, value_type=float, **kwargs):
+  def __init__(self, name, value_type=float, prior=None, **kwargs):
     self.value_type = value_type
+    self.prior = prior
     super(PrimitiveParameter, self).__init__(name, **kwargs)
 
   def hash_value(self, config):
@@ -642,6 +845,72 @@ class NumericParameter(PrimitiveParameter):
     else:
       return self.max_value - self.min_value + 1  # inclusive range
 
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+
+    Returns
+    -------
+    float
+      Parameter value
+    """
+    return float(self.get_value(cfg))
+
+  def set_num_value(self, cfg, value):
+    """Set parameter in the given configuration using numerical value.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+    value : float
+      Parameter value
+    """
+    self.set_value(cfg, self.value_type(value))
+
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    list of float
+      List with minimum and maximum
+    """
+    return [float(self.min_value), float(self.max_value)]
+
+  def get_random_values(self, count, lower_bound, upper_bound, random_state):
+    """Returns random values between the given bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    lower_bound : float
+      Lower bound
+    upper_bound : float
+      Upper_bound
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, )
+      Random configuration vectors    
+    """
+    min_value, max_value = self.legal_range(None)
+    min_value = max(min_value, lower_bound)
+    max_value = min(max_value, upper_bound)
+    if self.is_integer_type():
+      min_value = math.ceil(min_value)
+      max_value = math.floor(max_value)
+      return random_state.randint(min_value, max_value + 1, count).astype(float)
+    else:
+      return random_state.uniform(min_value, max_value, count)
+
 
 class IntegerParameter(NumericParameter):
   """
@@ -694,11 +963,30 @@ class IntegerParameter(NumericParameter):
     self.set_value(cfg, p)
     return v
 
+  def get_values(self):
+    return range(self.min_value, self.max_value + 1)
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    return min(max(float(round(value)), self.max_value), self.min_value)
+
 
 class FloatParameter(NumericParameter):
-  def __init__(self, name, min_value, max_value, **kwargs):
+  def __init__(self, name, min_value, max_value, iter_steps = 8, **kwargs):
     """min/max are inclusive"""
     kwargs['value_type'] = float
+    self.iter_steps = iter_steps
     super(FloatParameter, self).__init__(name, min_value, max_value, **kwargs)
 
   def op3_swarm(self, cfg, cfg1, cfg2, c=1, c1=0.5,
@@ -738,6 +1026,25 @@ class FloatParameter(NumericParameter):
     self.set_value(cfg, p)
     return v
 
+  def get_values(self):
+    step_size = (self.max_value - self.min_value) / (self.iter_steps - 1)
+    return [self.min_value + step_size * step for step in range(self.iter_steps)]
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    return min(max(value, self.min_value), self.max_value)
+
 
 class ScaledNumericParameter(NumericParameter):
   """
@@ -772,6 +1079,53 @@ class ScaledNumericParameter(NumericParameter):
   def legal_range(self, config):
     return map(self._scale, NumericParameter.legal_range(self, config))
 
+  def get_values(self):
+    scaled_values = range(int(self._scale(self.min_value)), int(self._scale(self.max_value)) + 1)
+    return (self._unscale(value) for value in scaled_values)
+
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    list of float
+      List with minimum and maximum
+    """
+    min_val = self._scale(self.min_value)
+    max_val = self._scale(self.max_value)
+    return [float(min_val), float(max_val)]
+    
+  def get_info(self):
+    """Return a database object with information about the parameter.
+
+    Returns
+    -------
+    ParameterInfo
+      Parameter information
+    """
+    info = ParameterInfo(name=self.name,
+                         kind=self.__class__.__name__,
+                         lower_bound=self.min_value,
+                         upper_bound=self.max_value)
+    return info
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    low, high = self.legal_range(None)
+    value = min(max(value, low), high)
+    return self._scale(self._unscale(value))
+
 
 class LogIntegerParameter(ScaledNumericParameter, FloatParameter):
   """
@@ -790,6 +1144,28 @@ class LogIntegerParameter(ScaledNumericParameter, FloatParameter):
     low, high = NumericParameter.legal_range(self, config)
     # increase the bounds account for rounding
     return self._scale(low - 0.4999), self._scale(high + 0.4999)
+
+
+class TrueLogIntegerParameter(ScaledNumericParameter, FloatParameter):
+  """A positive integer parameter that is searched on a log scale.
+
+  Intuitively, we would like a parameter that is twice as big to be sampled
+  only have as often.  That is exactly what happens with LogIntegerParameter
+  if the lower bound is 1.  For other values, this is not the case because the
+  offset that is applied skews the distribution.  This implementation does not
+  apply an offset.  As a result, the parameters are limited to positive
+  integers.
+  """
+
+  def _scale(self, v):
+    return math.log(v, 2.0)
+
+  def _unscale(self, v):
+    return int(round(2.0 ** v))
+
+  def legal_range(self, config):
+    low, high = NumericParameter.legal_range(self, config)
+    return self._scale(low), self._scale(high)
 
 
 class LogFloatParameter(ScaledNumericParameter, FloatParameter):
@@ -989,6 +1365,84 @@ class BooleanParameter(ComplexParameter):
     p = (s - random.random()) > 0
     self.set_value(cfg, p)
     return v
+  
+  def get_values(self):
+    return [True, False]
+
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration.
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float
+      Parameter value
+    """
+    return float(self.get_value(cfg))
+
+  def set_num_value(self, cfg, value):
+    """Set parameter in the given configuration using numerical value.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+    value : float
+      Parameter value
+    """
+    self.set_value(cfg, bool(value))
+
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    list of float
+      List with minimum and maximum
+    """
+    return [0.0, 1.0]
+  
+  def get_random_values(self, count, lower_bound, upper_bound, random_state):
+    """Returns random values between the given bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    lower_bound : float
+      Lower bound
+    upper_bound : float
+      Upper_bound
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, )
+      Random configuration vectors    
+    """
+    lower_bound = max(math.ceil(lower_bound), 0)
+    upper_bound = min(math.floor(upper_bound), 1) + 1
+    return random_state.randint(lower_bound, upper_bound, count).astype(float)
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    return 1.0 if value > 0.5 else 0.0
 
 
 class SwitchParameter(ComplexParameter):
@@ -1024,6 +1478,21 @@ class EnumParameter(ComplexParameter):
   def __init__(self, name, options):
     super(EnumParameter, self).__init__(name)
     self.options = list(options)
+    self.numerical = all(self.is_numerical(option) for option in options)
+
+  def is_numerical(self, value):
+    """Returns whether the provided argument can be converted to a number.
+
+    Returns
+    -------
+    bool
+      True if the argument can be converted to a number, and False otherwise
+    """
+    try:
+      float(value)
+      return True
+    except ValueError:
+      return False
 
   def op1_randomize(self, config):
     """
@@ -1032,12 +1501,184 @@ class EnumParameter(ComplexParameter):
     :param config: the configuration to be changed
     """
     self._set(config, random.choice(self.options))
-
+  
   def seed_value(self):
     return random.choice(self.options)
 
   def search_space_size(self):
     return max(1, len(self.options))
+
+  def get_values(self):
+    return self.options
+  
+  def get_num_value(self, cfg):
+    """Return numerical value of parameter in the given configuration.
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float
+      Parameter value
+    """
+    return float(self.options.index(self.get_value(cfg)))
+
+  def set_num_value(self, cfg, value):
+    """Set parameter in the given configuration using numerical value.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+    value : float
+      Parameter value
+    """
+    self.set_value(cfg, self.options[int(value)])
+
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    list of float
+      List with minimum and maximum
+    """
+    return [0.0, len(self.options) - 1]
+  
+  def get_random_values(self, count, lower_bound, upper_bound, random_state):
+    """Returns random values between the given bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    lower_bound : float
+      Lower bound
+    upper_bound : float
+      Upper_bound
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, )
+      Random configuration vectors    
+    """
+    lower_bound = max(0, int(math.ceil(lower_bound)))
+    upper_bound = min(len(self.options) - 1, int(math.floor(upper_bound)))
+    options = numpy.arange(lower_bound, upper_bound + 1, dtype='float')
+    return random_state.choice(options, count)
+
+  def get_info(self):
+    """Return a database object with information about the parameter.
+
+    Returns
+    -------
+    ParameterInfo
+      Parameter information
+    """
+    info = super(EnumParameter, self).get_info()
+    info.choices = self.options
+    return info
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    return min(max(round(value), 0.0), len(self.options) - 1)
+
+
+class CorrelatedEnumParameter(EnumParameter):
+  """Enumeration parameter with correlation between successive values.
+  """
+  
+  def get_num_value(self, cfg):
+    """Return numerical value of parameter in the given configuration.
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float
+      Parameter value
+    """
+    return float(self.get_value(cfg))
+
+  def set_num_value(self, cfg, value):
+    """Set parameter in the given configuration using numerical value.
+
+    Parameters
+    ----------
+    cfg : undefined
+      Configuration
+    value : float
+      Parameter value
+    """
+    self.set_value(cfg, value)
+
+  def get_bounds(self):
+    """Returns the minimum and maximum of the numerical representation.
+
+    Returns
+    -------
+    list of float
+      List with minimum and maximum
+    """
+    return [min(self.options), max(self.options)]
+  
+  def get_random_values(self, count, lower_bound, upper_bound, random_state):
+    """Returns random values between the given bounds.
+
+    Parameters
+    ----------
+    count : int
+      Number of vectors
+    lower_bound : float
+      Lower bound
+    upper_bound : float
+      Upper_bound
+    random_state : RandomState
+      Random state
+
+    Returns
+    -------
+    array of shape(count, )
+      Random configuration vectors    
+    """
+    options = [float(value) for value in self.options
+               if value >= lower_bound and value <= upper_bound]
+    return random_state.choice(options, count)
+  
+  def round_param(self, value):
+    """Round a parameter to the nearest valid value.
+
+    Parameters
+    ----------
+    value : float
+      Value to be rounded
+
+    Returns
+    -------
+    float
+      Rounded value
+    """
+    errors = [abs(value - option) for option in self.options]
+    return self.options[errors.index(min(errors))]
 
 
 class PermutationParameter(ComplexParameter):
