@@ -246,10 +246,9 @@ class Result(Base):
   collection_cost = Column(Float)
 
   #set by MeasurementInterface:
-  state = Column(Enum('OK', 'TIMEOUT', 'ERROR',
-                      name='t_result_state'),
-                 default='OK')
-  time = Column(Float)
+  state = Column(String(7))
+  msg = Column(String(128))
+  time = Column(Float, default = float('inf'))
   accuracy = Column(Float)
   energy = Column(Float)
   size = Column(Float)
