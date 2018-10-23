@@ -337,9 +337,9 @@ def goodkillpg(pid):
   log.debug("killing pid %d", pid)
   try:
     if hasattr(os, 'killpg'):
-      os.killpg(pid, signal.SIGKILL)
+      os.killpg(pid, signal.SIGTERM)
     else:
-      os.kill(pid, signal.SIGKILL)
+      os.kill(pid, signal.SIGTERM)
   except:
     log.error('error killing process %s', pid, exc_info=True)
 

@@ -191,7 +191,7 @@ class MeasurementDriver(DriverBase):
         # See http://stackoverflow.com/questions/1408356/keyboard-interrupts-with-pythons-multiprocessing-pool
         compile_results = thread_pool.map_async(compile_result,
                                                 thread_args).get(9999999)
-      except Exception:
+      except KeyboardInterrupt, Exception:
         # Need to kill other processes because only one thread receives
         # exception
         self.interface.kill_all()
