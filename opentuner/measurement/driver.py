@@ -185,26 +185,24 @@ class MeasurementDriver(DriverBase):
       if len(desired_results) == 0:
         return
       thread_pool = ThreadPool(len(desired_results))
-      # print 'Compiling %d results' % len(thread_args)
       try:
-        # Use map_async instead of map because of bug where keyboardinterrupts are ignored
-        # See http://stackoverflow.com/questions/1408356/keyboard-interrupts-with-pythons-multiprocessing-pool
-        compile_results = thread_pool.map_async(compile_result,
-                                                thread_args).get(9999999)
-      except KeyboardInterrupt, Exception:
-        # Need to kill other processes because only one thread receives
-        # exception
-        self.interface.kill_all()
-        raise
-      # print 'Running %d results' % len(thread_args)
-      for dr, compile_result in zip(desired_results, compile_results):
-        # Make sure compile was successful
-        self.run_desired_result(dr, compile_result, dr.id)
         try:
+          # Use map_async instead of map because of bug where keyboardinterrupts are ignored
+          # See http://stackoverflow.com/questions/1408356/keyboard-interrupts-with-pythons-multiprocessing-pool
+          compile_results = thread_pool.map_async(compile_result,
+                                                  thread_args).get(9999999)
+        except KeyboardInterrupt, Exception:
+          # Need to kill other processes because only one thread receives
+          # exception
+          self.interface.kill_all()
+          raise
+        for dr, compile_result in zip(desired_results, compile_results):
+          # Make sure compile was successful
+          self.run_desired_result(dr, compile_result, dr.id)
+      except:
+        for dr in desired_results:
           self.interface.cleanup(dr.id)
-        except RuntimeError, e:
-          print e
-          # print 'Done!'
+        raise
       thread_pool.close()
     else:
       for dr in q.all():
