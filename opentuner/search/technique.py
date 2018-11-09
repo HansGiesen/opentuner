@@ -341,7 +341,7 @@ def get_enabled(args):
 
   if not args.technique:
     # no techniques specified, default technique
-    args.technique = ['AUCBanditMetaTechniqueA']
+    args.technique = ['SpaceContractorMetaTechnique']
 
   for unknown in set(args.technique) - set(map(_.name, techniques)):
     log.error('unknown technique %s', unknown)

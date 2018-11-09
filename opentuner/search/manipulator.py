@@ -444,8 +444,9 @@ class PrimitiveParameter(Parameter):
   """
   __metaclass__ = abc.ABCMeta
 
-  def __init__(self, name, value_type=float, **kwargs):
+  def __init__(self, name, value_type=float, prior=None, **kwargs):
     self.value_type = value_type
+    self.prior = prior
     super(PrimitiveParameter, self).__init__(name, **kwargs)
 
   def hash_value(self, config):
