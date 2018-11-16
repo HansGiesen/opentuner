@@ -76,9 +76,9 @@ class MeasurementDriver(DriverBase):
         return default
 
     if desired_result.limit:
-      return min(desired_result.limit, self.upper_limit_multiplier * best.time)
+      return min(desired_result.limit, self.upper_limit_multiplier * best.run_time)
     else:
-      return self.default_limit_multiplier * best.time
+      return self.default_limit_multiplier * best.run_time
 
   def report_result(self, desired_result, result, input=None):
     result.configuration = desired_result.configuration
@@ -96,7 +96,7 @@ class MeasurementDriver(DriverBase):
         'Result(id=%d, cfg=%d, time=%.4f, accuracy=%.2f, collection_cost=%.2f)',
         result.id,
         result.configuration.id,
-        result.time,
+        result.run_time,
         result.accuracy if result.accuracy is not None else float('NaN'),
         result.collection_cost)
     self.commit()

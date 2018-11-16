@@ -248,7 +248,10 @@ class Result(Base):
   #set by MeasurementInterface:
   state = Column(String(7))
   msg = Column(String(128))
-  time = Column(Float, default = float('inf'))
+  presynth_time = Column(Float, default = float('inf'))
+  synth_time = Column(Float, default = float('inf'))
+  impl_time = Column(Float, default = float('inf'))
+  run_time = Column(Float, default = float('inf'))
   accuracy = Column(Float)
   energy = Column(Float)
   size = Column(Float)

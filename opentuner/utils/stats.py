@@ -144,7 +144,7 @@ class StatsMain(object):
       all_run_ids = map(_[0].id, itertools.chain(*label_runs.values()))
       q = (session.query(Result)
            .filter(Result.tuning_run_id.in_(all_run_ids))
-           .filter(Result.time < float('inf'))
+           .filter(Result.run_time < float('inf'))
            .filter_by(was_new_best=True, state='OK'))
       total = q.count()
       if total == 0: 
@@ -160,8 +160,8 @@ class StatsMain(object):
       log.info("%s -- best %.4f / worst %.f4 "
                "-- %d of %d acceptable -- %d techniques with %d to %d runs",
                d,
-               best.time,
-               worst.time,
+               best.run_time,
+               worst.run_time,
                acceptable,
                total,
                len(label_runs.values()),
@@ -310,7 +310,7 @@ class StatsMain(object):
     """
 
     #extract_fn = lambda dr: objective.stats_quality_score(dr.result, worst, best)
-    extract_fn = _.result.time
+    extract_fn = _.result.run_time
     combine_fn = min
     no_data = 999
 

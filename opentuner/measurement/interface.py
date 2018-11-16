@@ -232,7 +232,7 @@ class MeasurementInterface(object):
     returns dictionary like
       {'returncode': 0,
        'stdout': '', 'stderr': '',
-       'timeout': False, 'time': 1.89}
+       'timeout': False, 'run_time': 1.89}
     """
     the_io_thread_pool_init(self.args.parallelism)
     if limit is float('inf'):
@@ -282,7 +282,7 @@ class MeasurementInterface(object):
       self.proc_lock.release()
 
     t1 = time.time()
-    return {'time': float('inf') if killed else (t1 - t0),
+    return {'run_time': float('inf') if killed else (t1 - t0),
             'timeout': killed,
             'returncode': p.returncode,
             'stdout': stdout_result.get(),
