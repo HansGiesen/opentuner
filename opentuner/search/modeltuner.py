@@ -3,6 +3,9 @@
 # Author: Hans Giesen (giesen@seas.upenn.edu)
 #######################################################################################################################
 
+# Number of iterations to spend on searching the optimum
+ITERATIONS = 100
+
 import copy
 import logging
 
@@ -149,24 +152,44 @@ class ModelTuner(object):
 
 
   def tune(self):
+    """
+    Optimize the objective function.
+    """
 
+    # We haven't evaluated anything yet.
     best_result = None
-    for iter in range(100):
+
+    # Locate the optimum.
+    for iter in range(ITERATIONS):
+
+      # Request a new configuration to evaluate.
       desired_result = self.technique.desired_result()
+
+      # Stop searching if the search technique does not suggest any configurations anymore.
       if desired_result == None:
-        # desired_result is None if a technique keeps suggesting configurations that have already been tested.
         break
-#      if desired_result == False:
-#        raise RunTimeError("The search technique returns False.  I wasn't sure what to do with that.")
+
+      # Construct a result object for the new configuration.
       cfg = desired_result.configuration
       result = Result()
       result.configuration = cfg
+
+      # Predict the result based on the model.
       result.run_time = self.model.predict(cfg.data)
+
+      # Add the result to the data set.
       self.driver.add_result(result)
+
+      # Inform the search technique about the result.
       self.driver.invoke_result_callback(result)
+
+      # Update the best result that was found so far.
       if best_result == None or self.objective.lt(result, best_result):
         best_result = result
+
+      # Provide the best result to the driver, which shares it with interested search techniques.
       self.driver.set_best_result(best_result)
 
+    # Return the configuration associated with the best result.
     return best_result.configuration
 

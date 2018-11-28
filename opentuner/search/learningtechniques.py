@@ -2,14 +2,17 @@
 #
 # Base classes for search techniques that use machine-learning models
 #
-# TODO: Get rid of ConfigurationSelector.  Integrate it into LearningTechnique instead.
-#
 # Author: Hans Giesen (giesen@seas.upenn.edu)
 #######################################################################################################################
 
 import abc
 import logging
 
+from .bandittechniques import AUCBanditMetaTechnique
+from .differentialevolution import DifferentialEvolutionAlt
+from .evolutionarytechniques import NormalGreedyMutation, UniformGreedyMutation
+from .modeltuner import ModelTuner
+from .simplextechniques import RandomNelderMead
 from .technique import SearchTechnique
 
 log = logging.getLogger(__name__)
@@ -17,10 +20,12 @@ log = logging.getLogger(__name__)
 
 class LearningTechnique(SearchTechnique):
   """
-  Machine Learning Search Technique
+  Abstract base class for machine-learning search techniques
   """
 
-  def __init__(self, model, selector, *pargs, **kwargs):
+  __metaclass__ = abc.ABCMeta
+
+  def __init__(self, model, *pargs, **kwargs):
     """
     Initialize the machine learning search technique object.
     """
@@ -29,42 +34,16 @@ class LearningTechnique(SearchTechnique):
     super(LearningTechnique, self).__init__(*pargs, **kwargs)
 
     # Remember configuration selector to use.
-    self.selector = selector
+    self.model = model
 
     # Create an empty dataset.
-    self.data_set = set()
+    self.data_set = []
+
+    # Configurations that are still being evaluated
+    self.pending_cfgs = set()
 
     # Provide the dataset to the model and configuration selector.
     model.set_data_set(self.data_set)
-    selector.set_data_set(self.data_set)
-
-    # Provide the model to the configuration selector.
-    selector.set_model(model)
-
-
-  def set_driver(self, driver):
-    """
-    Set the search driver.
-    """
-
-    # Use the parent object to perform most of the functionality.
-    super(LearningTechnique, self).set_driver(driver)
-
-    # Provide the manipulator to the configuration selector.  We need it because it contains information about the
-    # parameters.
-    self.selector.set_manipulator(driver.manipulator)
-
-    # Provide the objective to the configuration selector.
-    self.selector.set_objective(driver.objective)
-
-
-  def desired_configuration(self):
-    """
-    Suggest a new configuration to evaluate.
-    """
-
-    # Return new configuration chosen by selector.
-    return self.selector.select_configuration()
 
 
   def handle_requested_result(self, result):
@@ -73,7 +52,10 @@ class LearningTechnique(SearchTechnique):
     """
 
     # Add a new result to the data set.
-    self.data_set.add(result)
+    self.data_set.append(result)
+
+    # Remove the configuration from the list with pending configurations.
+    self.pending_cfgs.discard(result.configuration)
 
 
 class Model(object):
@@ -104,44 +86,45 @@ class Model(object):
     """
 
 
-class ConfigurationSelector(object):
+class GreedyLearningTechnique(LearningTechnique):
   """
-  Abstract base class for selecting configurations based on machine learning
+  Configuration selector that tries the optimal configuration according to the model unless it has already been tried,
+  in which case a random configuration is chosen.
   """
 
   __metaclass__ = abc.ABCMeta
 
-  def set_data_set(self, data_set):
+  def desired_configuration(self):
     """
-    Set data set.
+    Suggest a new configuration to evaluate.  If the configuration that the model thinks is best has not been tried
+    yet, we will suggest it.  Otherwise, we suggest a random configuration.
     """
-    self.data_set = data_set
 
+    # Suggest a random configuration if we don't have any data points yet.
+    if len(self.data_set) == 0:
+      return self.manipulator.random()
 
-  def set_model(self, model):
-    """
-    Set model.
-    """
-    self.model = model
+    # Search technique to use for exploring the model.
+    technique = AUCBanditMetaTechnique([
+        DifferentialEvolutionAlt(),
+        UniformGreedyMutation(),
+        NormalGreedyMutation(mutation_rate = 0.3),
+        RandomNelderMead(),
+      ])
 
+    # Create a version of the tuner that does not use the database.
+    tuner = ModelTuner(self.model, technique, self.objective, self.manipulator)
 
-  def set_manipulator(self, manipulator):
-    """
-    Set manipulator.
-    """
-    self.manipulator = manipulator
+    # Explore the model.
+    cfg = tuner.tune()
 
+    # Use a random configuration if we have already evaluated this configuration or are planning to evaluate it.
+    if (cfg in [result.configuration for result in self.data_set]) or (cfg in self.pending_cfgs):
+      cfg = self.manipulator.random()
 
-  def set_objective(self, objective):
-    """
-    Set objective.
-    """
-    self.objective = objective
+    # Add the configuration to the list with pending configurations.
+    self.pending_cfgs.add(cfg)
 
-
-  @abc.abstractmethod
-  def select_configuration(self):
-    """
-    Suggest a new configuration to evaluate.
-    """
+    # Return the configuration.
+    return cfg
 
