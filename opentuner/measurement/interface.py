@@ -63,6 +63,7 @@ class MeasurementInterface(object):
     # If parallel_compile is False then compile_and_run() will be invoked
     # sequentially otherwise the driver first invokes compile() in parallel
     # followed by run_precompiled() sequentially
+    self.terminate = False
 
   def compile(self, config_data, id):
     """
@@ -221,6 +222,7 @@ class MeasurementInterface(object):
 
   def kill_all(self):
     self.proc_lock.acquire()
+    self.terminate = True
     for proc in self.procs:
       goodkillpg(proc, 10)
     self.proc_lock.release()
@@ -246,7 +248,10 @@ class MeasurementInterface(object):
                          **kwargs)
     # Add p.pid to list of processes to kill in case of keyboardinterrupt
     self.proc_lock.acquire()
-    self.procs.append(p)
+    if self.terminate:
+      p.terminate()
+    else:
+      self.procs.append(p)
     self.proc_lock.release()
 
     try:
