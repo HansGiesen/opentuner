@@ -436,6 +436,10 @@ class Parameter(object):
         self.copy_value(cfg, cfgs[i])
         break
 
+  @abc.abstractmethod
+  def get_values(self):
+    pass
+
 
 class PrimitiveParameter(Parameter):
   """
@@ -695,11 +699,15 @@ class IntegerParameter(NumericParameter):
     self.set_value(cfg, p)
     return v
 
+  def get_values(self):
+    return range(self.min_value, self.max_value + 1)
 
-class FloatParameter(NumericParameter):
+
+class FloatParameter(NumericParameter, iter_steps = 8):
   def __init__(self, name, min_value, max_value, **kwargs):
     """min/max are inclusive"""
     kwargs['value_type'] = float
+    self.iter_steps = iter_steps
     super(FloatParameter, self).__init__(name, min_value, max_value, **kwargs)
 
   def op3_swarm(self, cfg, cfg1, cfg2, c=1, c1=0.5,
@@ -739,6 +747,10 @@ class FloatParameter(NumericParameter):
     self.set_value(cfg, p)
     return v
 
+  def get_values(self):
+    step_size = (self.max_value - self.min_value) / (self.iter_steps - 1)
+    return [self.min_value + step_size * step for step in range(self.iter_steps)]
+
 
 class ScaledNumericParameter(NumericParameter):
   """
@@ -772,6 +784,10 @@ class ScaledNumericParameter(NumericParameter):
 
   def legal_range(self, config):
     return map(self._scale, NumericParameter.legal_range(self, config))
+
+  def get_values(self):
+    scaled_values = range(self._scale(self.min_value), self._scale(self.max_value) + 1)
+    return (self._unscale(value) for value in scaled_values)
 
 
 class LogIntegerParameter(ScaledNumericParameter, FloatParameter):
@@ -1039,6 +1055,9 @@ class EnumParameter(ComplexParameter):
 
   def search_space_size(self):
     return max(1, len(self.options))
+
+  def get_values(self):
+    return self.options
 
 
 class PermutationParameter(ComplexParameter):
