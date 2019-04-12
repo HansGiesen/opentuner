@@ -703,8 +703,8 @@ class IntegerParameter(NumericParameter):
     return range(self.min_value, self.max_value + 1)
 
 
-class FloatParameter(NumericParameter, iter_steps = 8):
-  def __init__(self, name, min_value, max_value, **kwargs):
+class FloatParameter(NumericParameter):
+  def __init__(self, name, min_value, max_value, iter_steps = 8, **kwargs):
     """min/max are inclusive"""
     kwargs['value_type'] = float
     self.iter_steps = iter_steps
@@ -786,7 +786,7 @@ class ScaledNumericParameter(NumericParameter):
     return map(self._scale, NumericParameter.legal_range(self, config))
 
   def get_values(self):
-    scaled_values = range(self._scale(self.min_value), self._scale(self.max_value) + 1)
+    scaled_values = range(int(self._scale(self.min_value)), int(self._scale(self.max_value)) + 1)
     return (self._unscale(value) for value in scaled_values)
 
 
