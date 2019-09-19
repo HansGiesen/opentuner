@@ -257,6 +257,10 @@ class Result(Base):
   size = Column(Float)
   confidence = Column(Float)
   #extra = Column(PickleType)
+  luts = Column(Float, default = float('inf'))
+  regs = Column(Float, default = float('inf'))
+  brams = Column(Float, default = float('inf'))
+  dsps = Column(Float, default = float('inf'))
 
   #set by SearchDriver
   was_new_best = Column(Boolean)

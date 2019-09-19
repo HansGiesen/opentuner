@@ -135,7 +135,7 @@ class MeasurementInterface(object):
     run the given desired_result on input and produce a Result(),
     abort early if limit (in seconds) is reached
     """
-    return opentuner.resultdb.models.Result()
+    return opentuner.resultsdb.models.Result()
 
   def save_final_config(self, config):
     """

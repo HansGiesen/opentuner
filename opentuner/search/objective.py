@@ -1,5 +1,6 @@
 import abc
 import logging
+import math
 
 from fn import _
 
@@ -299,6 +300,46 @@ class ThresholdAccuracyMinimizeTime(SearchObjective):
     return None
 
 
+class ThresholdAreaMinimizeTime(SearchObjective):
+  """
+  if area < target:
+    minimize run_time
+  else:
+    minimize area"""
 
+  def __init__(self, max_luts, max_regs, max_brams, max_dsps):
+    self.max_luts = max_luts if max_luts is not None else float('inf')
+    self.max_regs = max_regs if max_regs is not None else float('inf')
+    self.max_brams = max_brams if max_brams is not None else float('inf')
+    self.max_dsps = max_dsps if max_dsps is not None else float('inf')
+    super(ThresholdAreaMinimizeTime, self).__init__()
 
+  def result_compare(self, result1, result2):
+    """cmp() compatible comparison of resultsdb.models.Result"""
+    return cmp((max(result1.luts / self.max_luts, result1.regs / self.max_regs,
+                    result1.brams / self.max_brams, result1.dsps / self.max_dsps, 1.0), result1.run_time),
+               (max(result2.luts / self.max_luts, result2.regs / self.max_regs,
+                    result2.brams / self.max_brams, result2.dsps / self.max_dsps, 1.0), result2.run_time))
 
+  def result_order_by_terms(self):
+    """return database columns required to order by the objective"""
+    resources = ["luts", "regs", "brams", "dsps"]
+    limits = [getattr(self, "max_" + resource) for resource in resources]
+    strings = ["%s / %f" % (resources[i], limits[i]) for i in range(len(resources)) if not math.isinf(limits[i])]
+    return ["max(%s, 1.0)" % (", ".join(strings)), opentuner.resultsdb.models.Result.run_time]
+
+  def result_relative(self, result1, result2):
+    """return None, or a relative goodness of resultsdb.models.Result"""
+    raise NotImplementedError()
+
+  def get_means(self, result):
+    """Return prediction of each metric."""
+    return (result.run_time, result.luts, result.regs, result.brams, result.dsps)
+  
+  def get_std_devs(self, result):
+    """Return standard deviation of each metric."""
+    return (result.run_time_std_dev, result.luts_std_dev, result.regs_std_dev, result.brams_std_dev, result.dsps_std_dev)
+  
+  def get_constraints(self):
+    """Return constraints."""
+    return (None, self.max_luts, self.max_regs, self.max_brams, self.max_dsps)
