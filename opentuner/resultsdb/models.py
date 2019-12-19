@@ -248,15 +248,27 @@ class Result(Base):
   #set by MeasurementInterface:
   state = Column(String(7))
   msg = Column(String(128))
-  presynth_time = Column(Float, default = float('inf'))
-  synth_time = Column(Float, default = float('inf'))
-  impl_time = Column(Float, default = float('inf'))
   run_time = Column(Float, default = float('inf'))
   accuracy = Column(Float)
   energy = Column(Float)
   size = Column(Float)
   confidence = Column(Float)
   #extra = Column(PickleType)
+
+  presynth_time = Column(Float, default = float('inf'))
+  synth_time = Column(Float, default = float('inf'))
+  impl_time = Column(Float, default = float('inf'))
+
+  presynth_luts = Column(Float, default = float('inf'))
+  presynth_regs = Column(Float, default = float('inf'))
+  presynth_brams = Column(Float, default = float('inf'))
+  presynth_dsps = Column(Float, default = float('inf'))
+
+  synth_luts = Column(Float, default = float('inf'))
+  synth_regs = Column(Float, default = float('inf'))
+  synth_brams = Column(Float, default = float('inf'))
+  synth_dsps = Column(Float, default = float('inf'))
+
   luts = Column(Float, default = float('inf'))
   regs = Column(Float, default = float('inf'))
   brams = Column(Float, default = float('inf'))
