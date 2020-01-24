@@ -119,15 +119,17 @@ class Configuration(Base):
   program = relationship(Program)
   hash = Column(String(64))
   data = Column(PickleType(pickler=CompressedPickler))
+  fidelity = Column(Integer)
 
   @classmethod
-  def get(cls, session, program, hashv, datav):
+  def get(cls, session, program, hashv, datav, fidelity):
     try:
       session.flush()
       return (session.query(Configuration)
-              .filter_by(program=program, hash=hashv).one())
+              .filter_by(program=program, hash=hashv, fidelity=fidelity).one())
     except sqlalchemy.orm.exc.NoResultFound:
-      t = Configuration(program=program, hash=hashv, data=datav)
+      t = Configuration(program=program, hash=hashv, data=datav,
+                        fidelity=fidelity)
       session.add(t)
       return t
 
@@ -232,7 +234,7 @@ class Result(Base):
   #set by MeasurementDriver:
   configuration_id = Column(ForeignKey(Configuration.id))
   configuration = relationship(Configuration)
-
+  
   machine_id = Column(ForeignKey(Machine.id))
   machine = relationship(Machine, backref='results')
 
@@ -255,20 +257,8 @@ class Result(Base):
   confidence = Column(Float)
   #extra = Column(PickleType)
 
-  presynth_time = Column(Float, default = float('inf'))
-  synth_time = Column(Float, default = float('inf'))
-  impl_time = Column(Float, default = float('inf'))
-
-  presynth_luts = Column(Float, default = float('inf'))
-  presynth_regs = Column(Float, default = float('inf'))
-  presynth_brams = Column(Float, default = float('inf'))
-  presynth_dsps = Column(Float, default = float('inf'))
-
-  synth_luts = Column(Float, default = float('inf'))
-  synth_regs = Column(Float, default = float('inf'))
-  synth_brams = Column(Float, default = float('inf'))
-  synth_dsps = Column(Float, default = float('inf'))
-
+  build_time = Column(Float, default = float('inf'))
+  
   luts = Column(Float, default = float('inf'))
   regs = Column(Float, default = float('inf'))
   brams = Column(Float, default = float('inf'))

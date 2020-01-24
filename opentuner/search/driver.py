@@ -247,11 +247,11 @@ class SearchDriver(DriverBase):
 
     return PluginProxy()
 
-  def get_configuration(self, cfg):
+  def get_configuration(self, cfg, fidelity = None):
     """called by SearchTechniques to create Configuration objects"""
     self.manipulator.normalize(cfg)
     hashv = self.manipulator.hash_config(cfg)
-    config = Configuration.get(self.session,self.program, hashv, cfg)
+    config = Configuration.get(self.session,self.program, hashv, cfg, fidelity)
     return config
 
   def main(self):
