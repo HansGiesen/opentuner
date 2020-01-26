@@ -250,19 +250,19 @@ class Result(Base):
   #set by MeasurementInterface:
   state = Column(String(7))
   msg = Column(String(128))
-  run_time = Column(Float, default = float('inf'))
+  run_time = Column(Float)
   accuracy = Column(Float)
   energy = Column(Float)
   size = Column(Float)
   confidence = Column(Float)
   #extra = Column(PickleType)
 
-  build_time = Column(Float, default = float('inf'))
+  build_time = Column(Float)
   
-  luts = Column(Float, default = float('inf'))
-  regs = Column(Float, default = float('inf'))
-  brams = Column(Float, default = float('inf'))
-  dsps = Column(Float, default = float('inf'))
+  luts = Column(Float)
+  regs = Column(Float)
+  brams = Column(Float)
+  dsps = Column(Float)
 
   #set by SearchDriver
   was_new_best = Column(Boolean)

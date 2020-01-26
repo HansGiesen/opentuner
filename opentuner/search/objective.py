@@ -301,17 +301,18 @@ class ThresholdAccuracyMinimizeTime(SearchObjective):
 
 
 class ThresholdAreaMinimizeTime(SearchObjective):
-  """
-  if area < target:
-    minimize run_time
-  else:
-    minimize area"""
+  """Minimize runtime under area constraints.
 
-  def __init__(self, max_luts, max_regs, max_brams, max_dsps):
-    self.max_luts = max_luts if max_luts is not None else float('inf')
-    self.max_regs = max_regs if max_regs is not None else float('inf')
-    self.max_brams = max_brams if max_brams is not None else float('inf')
-    self.max_dsps = max_dsps if max_dsps is not None else float('inf')
+  If the area constraint cannot be met, the objective minimizes area instead.
+  
+  Parameters
+  ----------
+  constraints : tuple with 4 ints
+    Resource constraints on the LUTs, CLB registers, DSPs, and BRAM18s
+    respectively
+  """
+  def __init__(self, constraints):
+    self.max_luts, self.max_regs, self.max_dsps, self.max_brams = constraints
     super(ThresholdAreaMinimizeTime, self).__init__()
 
   def result_compare(self, result1, result2):
