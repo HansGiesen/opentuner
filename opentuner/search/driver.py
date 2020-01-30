@@ -205,8 +205,11 @@ class SearchDriver(DriverBase):
 
   def process_new_results(self):
     self.new_results = []
+    max_fidelity = getattr(self.root_technique, 'max_fidelity')
     for result in (self.results_query()
-                       .filter_by(was_new_best=None)
+                       .join(Configuration)
+                       .filter(Result.was_new_best == None)
+                       .filter(Configuration.fidelity.in_([None, max_fidelity]))
                        .order_by(Result.collection_date)):
       self.plugin_proxy.on_result(result)
       self.new_results.append(result)

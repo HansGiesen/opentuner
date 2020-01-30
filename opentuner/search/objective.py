@@ -313,6 +313,9 @@ class ThresholdAreaMinimizeTime(SearchObjective):
   """
   def __init__(self, constraints):
     self.max_luts, self.max_regs, self.max_dsps, self.max_brams = constraints
+    self.constraints = constraints
+    self.optimization_metric = 'run_time'
+    self.constrained_metrics = ("luts", "regs", "brams", "dsps")
     super(ThresholdAreaMinimizeTime, self).__init__()
 
   def result_compare(self, result1, result2):
@@ -332,15 +335,3 @@ class ThresholdAreaMinimizeTime(SearchObjective):
   def result_relative(self, result1, result2):
     """return None, or a relative goodness of resultsdb.models.Result"""
     raise NotImplementedError()
-
-  def get_means(self, result):
-    """Return prediction of each metric."""
-    return (result.run_time, result.luts, result.regs, result.brams, result.dsps)
-  
-  def get_std_devs(self, result):
-    """Return standard deviation of each metric."""
-    return (result.run_time_std_dev, result.luts_std_dev, result.regs_std_dev, result.brams_std_dev, result.dsps_std_dev)
-  
-  def get_constraints(self):
-    """Return constraints."""
-    return (None, self.max_luts, self.max_regs, self.max_brams, self.max_dsps)
