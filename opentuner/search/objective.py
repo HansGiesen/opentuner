@@ -6,6 +6,7 @@ from fn import _
 
 import opentuner
 from opentuner.resultsdb.models import *
+from sqlalchemy.sql.expression import func
 
 log = logging.getLogger(__name__)
 
@@ -327,10 +328,11 @@ class ThresholdAreaMinimizeTime(SearchObjective):
 
   def result_order_by_terms(self):
     """return database columns required to order by the objective"""
-    resources = ["luts", "regs", "brams", "dsps"]
-    limits = [getattr(self, "max_" + resource) for resource in resources]
-    strings = ["%s / %f" % (resources[i], limits[i]) for i in range(len(resources)) if not math.isinf(limits[i])]
-    return ["max(%s, 1.0)" % (", ".join(strings)), opentuner.resultsdb.models.Result.run_time]
+    expressions = []
+    for metric, constraint in zip(self.constrained_metrics, self.constraints):
+      if not math.isinf(constraint):
+        expressions.append(getattr(Result, metric) / constraint)
+    return [func.max(1.0, *expressions), Result.run_time]
 
   def result_relative(self, result1, result2):
     """return None, or a relative goodness of resultsdb.models.Result"""
