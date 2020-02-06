@@ -175,17 +175,25 @@ class MeasurementDriver(DriverBase):
       thread_args = []
 
       def compile_result(args):
-        interface, data, result_id = args[0: 3]
-        if len(args) == 3:
+        interface, data, result_id, fidelity, prev_result_id = args
+        if fidelity is None:
           return interface.compile(data, result_id)
         else:
-          return interface.compile(data, result_id, fidelity = args[3])
+          return interface.compile(data, result_id, fidelity, prev_result_id)
 
       for dr in q.all():
         if self.claim_desired_result(dr):
           desired_results.append(dr)
-          thread_args.append((self.interface, dr.configuration.data, dr.id,
-                              dr.configuration.fidelity))
+          cfg_data = dr.configuration.data
+          fidelity = dr.configuration.fidelity
+          if fidelity is not None and fidelity > 1:
+            driver = self.tuning_run_main.search_driver
+            cfg = driver.get_configuration(cfg_data, fidelity - 1)
+            prev_result_id = self.results_query(config=cfg).one().id
+          else:
+            prev_result_id = None
+          thread_args.append((self.interface, cfg_data, dr.id, fidelity,
+                              prev_result_id))
       if len(desired_results) == 0:
         return
       thread_pool = ThreadPool(len(desired_results))
