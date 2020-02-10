@@ -23,9 +23,17 @@ class DriverBase(object):
   def results_query(self,
                     generation=None,
                     objective_ordered=False,
-                    config=None):
+                    config=None,
+                    filter_fidelity=True):
     q = self.session.query(Result)
     q = q.filter_by(tuning_run=self.tuning_run)
+    
+    if filter_fidelity:
+      root_technique = tuning_run_main.search_driver.root_technique
+      max_fidelity = getattr(root_technique, 'max_fidelity', 1)
+      if max_fidelity > 1:
+        q = q.join(Configuration)
+        q = q.filter(Configuration.fidelity == max_fidelity)
 
     if config:
       q = q.filter_by(configuration=config)

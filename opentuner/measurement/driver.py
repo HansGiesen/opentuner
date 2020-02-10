@@ -176,7 +176,7 @@ class MeasurementDriver(DriverBase):
 
       def compile_result(args):
         interface, data, result_id, fidelity, prev_result_id = args
-        if fidelity is None:
+        if fidelity == 1:
           return interface.compile(data, result_id)
         else:
           return interface.compile(data, result_id, fidelity, prev_result_id)
@@ -185,11 +185,12 @@ class MeasurementDriver(DriverBase):
         if self.claim_desired_result(dr):
           desired_results.append(dr)
           cfg_data = dr.configuration.data
+          driver = self.tuning_run_main.search_driver
           fidelity = dr.configuration.fidelity
-          if fidelity is not None and fidelity > 1:
-            driver = self.tuning_run_main.search_driver
+          if fidelity > 1:
             cfg = driver.get_configuration(cfg_data, fidelity - 1)
-            prev_result_id = self.results_query(config=cfg).one().id
+            prev_result_id = self.results_query(config=cfg,
+                                                filter_fidelity=False).one().id
           else:
             prev_result_id = None
           thread_args.append((self.interface, cfg_data, dr.id, fidelity,
