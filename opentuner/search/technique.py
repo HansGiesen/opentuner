@@ -35,6 +35,7 @@ class SearchTechniqueBase(object):
       self.name = name
     else:
       self.name = self.default_name()
+    self.max_fidelity = 1
 
   def is_ready(self):
     """test if enough data has been gathered to use this technique"""

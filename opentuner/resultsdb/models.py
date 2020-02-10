@@ -119,7 +119,7 @@ class Configuration(Base):
   program = relationship(Program)
   hash = Column(String(64))
   data = Column(PickleType(pickler=CompressedPickler))
-  fidelity = Column(Integer)
+  fidelity = Column(Integer, default=1)
 
   @classmethod
   def get(cls, session, program, hashv, datav, fidelity):

@@ -29,8 +29,8 @@ class DriverBase(object):
     q = q.filter_by(tuning_run=self.tuning_run)
     
     if filter_fidelity:
-      root_technique = tuning_run_main.search_driver.root_technique
-      max_fidelity = getattr(root_technique, 'max_fidelity', 1)
+      driver = self.tuning_run_main.search_driver
+      max_fidelity = driver.root_technique.max_fidelity
       if max_fidelity > 1:
         q = q.join(Configuration)
         q = q.filter(Configuration.fidelity == max_fidelity)
