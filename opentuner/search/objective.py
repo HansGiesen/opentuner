@@ -315,16 +315,24 @@ class ThresholdAreaMinimizeTime(SearchObjective):
   def __init__(self, constraints):
     self.max_luts, self.max_regs, self.max_dsps, self.max_brams = constraints
     self.constraints = constraints
-    self.optimization_metric = 'run_time'
+    self.opt_metrics = ['run_time']
     self.constrained_metrics = ("luts", "regs", "brams", "dsps")
     super(ThresholdAreaMinimizeTime, self).__init__()
 
   def result_compare(self, result1, result2):
     """cmp() compatible comparison of resultsdb.models.Result"""
-    return cmp((max(result1.luts / self.max_luts, result1.regs / self.max_regs,
-                    result1.brams / self.max_brams, result1.dsps / self.max_dsps, 1.0), result1.run_time),
-               (max(result2.luts / self.max_luts, result2.regs / self.max_regs,
-                    result2.brams / self.max_brams, result2.dsps / self.max_dsps, 1.0), result2.run_time))
+    return cmp((max(result1.luts / self.max_luts,
+                    result1.regs / self.max_regs,
+                    result1.brams / self.max_brams,
+                    result1.dsps / self.max_dsps,
+                    1.0),
+                result1.run_time),
+               (max(result2.luts / self.max_luts,
+                    result2.regs / self.max_regs,
+                    result2.brams / self.max_brams,
+                    result2.dsps / self.max_dsps,
+                    1.0),
+                result2.run_time))
 
   def result_order_by_terms(self):
     """return database columns required to order by the objective"""
@@ -337,3 +345,26 @@ class ThresholdAreaMinimizeTime(SearchObjective):
   def result_relative(self, result1, result2):
     """return None, or a relative goodness of resultsdb.models.Result"""
     raise NotImplementedError()
+
+  def compute_cost(self, metrics):
+    """Compute the mean and standard deviation of the objective function.
+
+    Parameters
+    ----------
+    metrics : dict
+      This dictionary contains a tuple with the mean and standard deviation for
+      each optimization metric.
+
+    Returns
+    -------
+    float
+      Mean of cost
+    float
+      Standard deviation cost
+      
+    Notes
+    -----
+    The polarity of the cost function should always be such that it must be
+    minimized, not maximized.
+    """
+    return result['run_time']

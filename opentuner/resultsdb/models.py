@@ -297,6 +297,8 @@ class DesiredResult(Base):
   #input_id        = Column(ForeignKey(Input.id))
   #input           = relationship(Input, backref='desired_results')
 
+  thread = Column(Integer)
+
 
 Index('ix_desired_result_custom1', DesiredResult.tuning_run_id,
       DesiredResult.generation)

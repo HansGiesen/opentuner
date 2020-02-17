@@ -71,6 +71,15 @@ class SearchDriver(DriverBase):
     else:
       self.root_technique = copy.deepcopy(technique.get_root(self.args))
 
+    if getattr(self.args, 'original_batching', True):
+      self.batch_composer = None
+    else:
+      from hlstuner.search.gaussiandistribution import GaussianDistribution
+      from hlstuner.search.batchcomposition import BatchComposer
+      models = [GaussianDistribution() for i in range(3)]
+      self.batch_composer = BatchComposer(self.root_technique, models,
+                                          self.args.parallelism)
+
     if isinstance(self.root_technique, AUCBanditMetaTechnique):
       self.session.flush()
       info = BanditInfo(tuning_run=self.tuning_run,
@@ -127,6 +136,8 @@ class SearchDriver(DriverBase):
   def register_result_callback(self, desired_result, callback):
     if desired_result.result is not None:
       callback(desired_result.result)
+      if self.batch_composer:
+        self.batch_composer.add_result(dr.result)
     else:
       self.pending_result_callbacks.append((desired_result, callback))
 
@@ -136,6 +147,8 @@ class SearchDriver(DriverBase):
     for dr, callback in pending:
       if dr.result is not None:
         callback(dr.result)
+        if self.batch_composer:
+          self.batch_composer.add_result(dr.result)
         continue
       elif self.generation - dr.generation > self.args.pipelining:
         # see if we can find a result
@@ -147,6 +160,8 @@ class SearchDriver(DriverBase):
         if len(results):
           dr.result = results[0]
           callback(dr.result)
+          if self.batch_composer:
+            self.batch_composer.add_result(dr.result)
           continue
       # try again later
       self.pending_result_callbacks.append((dr, callback))
@@ -157,8 +172,16 @@ class SearchDriver(DriverBase):
   def run_generation_techniques(self):
     tests_this_generation = 0
     self.plugin_proxy.before_techniques()
-    for z in xrange(self.args.parallelism):
-      if self.seed_cfgs:
+    self.root_technique.start_batch()
+    if self.batch_composer:
+      batch = self.batch_composer.compose_batch()
+      batch_size = len(batch)
+    else:
+      batch_size = self.args.parallelism
+    for z in xrange(batch_size):
+      if self.batch_composer:
+        dr = batch.pop(0)
+      elif self.seed_cfgs:
         config = self.get_configuration(self.seed_cfgs.pop())
         dr = DesiredResult(configuration=config,
                            requestor='seed',

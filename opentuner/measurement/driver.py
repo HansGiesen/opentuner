@@ -171,19 +171,31 @@ class MeasurementDriver(DriverBase):
     q = self.query_pending_desired_results()
 
     if self.interface.parallel_compile:
-      desired_results = []
+      desired_results = {}
       thread_args = []
 
       def compile_result(args):
-        interface, data, result_id, fidelity, prev_result_id = args
-        if fidelity == 1:
-          return interface.compile(data, result_id)
-        else:
-          return interface.compile(data, result_id, fidelity, prev_result_id)
+        results = []
+        for interface, data, result_id, fidelity, prev_result_id in args:
+          if fidelity == 1:
+            kwargs = {}
+          else:
+            kwargs = {'fidelity': fidelity, 'prev_result_id': prev_result_id}
+          result = interface.compile(data, result_id, **kwargs)
+          results.append(result)
+        return results
 
       for dr in q.all():
         if self.claim_desired_result(dr):
-          desired_results.append(dr)
+          desired_results.setdefault(dr.thread, []).append(dr)
+      desired_results = desired_results.values()
+      desired_results = [grp for grp in desired_results if len(grp) > 0]
+      if len(desired_results) == 0:
+        return
+
+      for dr_grp in desired_results:
+        arg_grp = []
+        for dr in dr_grp:
           cfg_data = dr.configuration.data
           driver = self.tuning_run_main.search_driver
           fidelity = dr.configuration.fidelity
@@ -193,10 +205,9 @@ class MeasurementDriver(DriverBase):
                                                 filter_fidelity=False).one().id
           else:
             prev_result_id = None
-          thread_args.append((self.interface, cfg_data, dr.id, fidelity,
-                              prev_result_id))
-      if len(desired_results) == 0:
-        return
+          args = (self.interface, cfg_data, dr.id, fidelity, prev_result_id)
+          arg_grp.append(args)
+        thread_args.append(arg_grp)
       thread_pool = ThreadPool(len(desired_results))
       # print 'Compiling %d results' % len(thread_args)
       try:
@@ -209,6 +220,8 @@ class MeasurementDriver(DriverBase):
         # exception
         self.interface.kill_all()
         raise
+      desired_results = [dr for grp in desired_results for dr in grp]
+      compile_results = [result for grp in compile_results for result in grp]
       # print 'Running %d results' % len(thread_args)
       for dr, compile_result in zip(desired_results, compile_results):
         # Make sure compile was successful
