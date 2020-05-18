@@ -1006,6 +1006,9 @@ class BooleanParameter(ComplexParameter):
     p = (s - random.random()) > 0
     self.set_value(cfg, p)
     return v
+  
+  def get_values(self):
+    return [True, False]
 
 
 class SwitchParameter(ComplexParameter):
