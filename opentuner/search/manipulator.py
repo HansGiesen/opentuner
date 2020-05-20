@@ -264,6 +264,21 @@ class ConfigurationManipulator(ConfigurationManipulatorBase):
       param = param_dict[pname]
       getattr(param, sv_map[pname])(cfg, *args[pname], **kwargs[pname])
 
+  def get_vec(self, cfg):
+    """Return a vector representation of a configuration
+    
+    Parameters
+    ----------
+    cfg : dict
+      Configuration
+
+    Returns
+    -------
+    list of float
+      Vector representation
+    """
+    return [param.get_num_value(cfg) for param in self.parameters(cfg)]
+
 
 class Parameter(object):
   """
@@ -440,6 +455,22 @@ class Parameter(object):
   def get_values(self):
     pass
 
+  @abc.abstractmethod
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float:
+      Parameter value
+    """
+    pass
+
 
 class PrimitiveParameter(Parameter):
   """
@@ -564,6 +595,21 @@ class PrimitiveParameter(Parameter):
   def legal_range(self, config):
     """return the legal range for this parameter, inclusive"""
     return 0, 1
+
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float:
+      Parameter value
+    """
+    return float(self.get_value(cfg))
 
 
 class NumericParameter(PrimitiveParameter):
@@ -1010,6 +1056,21 @@ class BooleanParameter(ComplexParameter):
   def get_values(self):
     return [True, False]
 
+  def get_num_value(self, cfg):
+    """Returns numerical value of parameter in the given configuration
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float:
+      Parameter value
+    """
+    return float(self.get_value(cfg))
+
 
 class SwitchParameter(ComplexParameter):
   """
@@ -1061,6 +1122,21 @@ class EnumParameter(ComplexParameter):
 
   def get_values(self):
     return self.options
+  
+  def get_num_value(self, cfg):
+    """Return numerical value of parameter in the given configuration
+
+    Parameters
+    ----------
+    cfg: undefined
+      Configuration
+
+    Returns
+    -------
+    float:
+      Parameter value
+    """
+    return float(self.options.index(self.get_value(cfg)))
 
 
 class PermutationParameter(ComplexParameter):

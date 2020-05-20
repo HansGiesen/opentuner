@@ -77,6 +77,8 @@ class SearchDriver(DriverBase):
       from hlstuner.search.gaussiandistribution import GaussianDistribution
       from hlstuner.search.batchcomposition import BatchComposer
       models = [GaussianDistribution() for i in range(3)]
+      for model in models:
+        model.set_driver(self)
       self.batch_composer = BatchComposer(self.root_technique, models,
                                           self.args.parallelism)
 
